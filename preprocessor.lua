@@ -19,6 +19,10 @@ local optimisationLevel = 0;
 local excludedScripts = {};
 -- Should preprocessor dump the info for debugging
 local debugDump = false;
+-- The script acceptor function
+local scriptAcceptor = nil;
+-- The entrypoint generator function
+local entrypointGenerator = nil;
 
 local log_colors = {
     INFO = "#55FF55",
@@ -490,6 +494,50 @@ local function getScriptContents(tbl)
    return s;
 end
 
+---Resets the state of the preprocessor.
+function preproc.reset()
+   defines = {};
+   macros = {};
+   autoscripts = {};
+   entrypoint = avatar:getNBT().metadata.autoScripts[1];
+   runAfterPreproc = false;
+   optimisationLevel = 0;
+   excludedScripts = {};
+   debugDump = false;
+   scriptAcceptor = nil;
+   entrypointGenerator = nil;
+
+   preproc.macro("STRINGIFY", function (def)
+      local v = defines[def];
+      if v == nil then return '""';
+      else return '"'..v..'"'; end
+   end)
+end
+
+---Setting the script acceptor of the preprocessor.
+function preproc.setScriptAcceptor(acceptor)
+   if acceptor == nil then
+      scriptAcceptor = nil;
+      log("Setting script acceptor to default one.", "DEBUG");
+   else
+      typeOrError(acceptor, "function");
+      scriptAcceptor = acceptor;
+      log("Changed script acceptor.", "DEBUG");
+   end
+end
+
+---Setting the entrypoint generator of the preprocessor.
+function preproc.setEntrypointGenerator(generator)
+   if generator == nil then
+      entrypointGenerator = nil;
+      log("Resetting entrypoint generator to default one.", "DEBUG");
+   else
+      typeOrError(generator, "function");
+      entrypointGenerator = generator;
+      log("Changed entrypoint generator.", "DEBUG");
+   end
+end
+
 ---Runs the preprocessor
 function preproc.run()
    preproc.define("__PREPROCESSED__");
@@ -505,27 +553,33 @@ function preproc.run()
    
    if debugDump then file:mkdir("__preprocDebug"); end
 
+   local acceptScript = scriptAcceptor or addScript;
+
    for k, scriptData in pairs(scripts) do
       if excludedScripts[k] then
-         addScript(k, nil);
+         acceptScript(k, nil);
       elseif k ~= entrypoint then
          if not processed[k] then
             local scriptContents = getScriptContents(scriptData);
-            processed[k] = preproc.preprocessScript(v, scriptContents);
+            processed[k] = preproc.preprocessScript(k, scriptContents);
          end
          if debugDump then file:writeString(("__preprocDebug/%s.lua"):format(k), processed[k]); end
-         addScript(k, processed[k]);
+         acceptScript(k, processed[k]);
       end
    end
 
    if entrypoint then
-      local init_script_contents = "";
-
-      for _, v in ipairs(autoscripts) do
-         init_script_contents = init_script_contents .. ("require '%s'\n"):format(v);
+      local init_script_contents;
+      if not entrypointGenerator then
+         init_script_contents = "";
+         for _, v in ipairs(autoscripts) do
+            init_script_contents = init_script_contents .. ("require '%s'\n"):format(v);
+         end
+      else
+         init_script_contents = entrypointGenerator(autoscripts);
       end
 
-      addScript(entrypoint, init_script_contents);
+      acceptScript(entrypoint, init_script_contents);
       if runAfterPreproc then
          local f, err = loadstring(init_script_contents, entrypoint);
          if not f then error(err) end
@@ -672,10 +726,6 @@ __expand_macro = function(args, macroContent)
    end
 end
 
-preproc.macro("STRINGIFY", function (def)
-   local v = defines[def];
-   if v == nil then return '""';
-   else return '"'..v..'"'; end
-end)
+preproc.reset();
 
 return preproc;
