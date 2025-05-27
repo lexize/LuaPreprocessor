@@ -1,0 +1,7 @@
+{
+   "name": "annotations",
+   "description": "Avatar made for testing Lua annotations",
+   "autoScripts": [
+      "init"
+   ]
+}
