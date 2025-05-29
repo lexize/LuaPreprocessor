@@ -486,14 +486,6 @@ function preproc.preprocessScript(name, content)
    return out;
 end
 
-local function getScriptContents(tbl)
-   local s = "";
-   for _, v in ipairs(tbl) do
-      s = s .. string.char(v % 256);
-   end
-   return s;
-end
-
 ---Resets the state of the preprocessor.
 function preproc.reset()
    defines = {};
@@ -541,13 +533,11 @@ end
 ---Runs the preprocessor
 function preproc.run()
    preproc.define("__PREPROCESSED__");
-   local scripts = avatar:getNBT().scripts;
+   local scripts = getScripts();
    local processed = {}
    for _, v in ipairs(autoscripts) do
-      local scriptData = scripts[v];
-      if scriptData then
-         local scriptContents = getScriptContents(scriptData);
-         processed[v] = preproc.preprocessScript(v, scriptContents);
+      if scripts[v] then
+         processed[v] = preproc.preprocessScript(v, scripts[v]);
       end
    end
    
@@ -555,13 +545,12 @@ function preproc.run()
 
    local acceptScript = scriptAcceptor or addScript;
 
-   for k, scriptData in pairs(scripts) do
+   for k, scriptContent in pairs(scripts) do
       if excludedScripts[k] then
          acceptScript(k, nil);
       elseif k ~= entrypoint then
          if not processed[k] then
-            local scriptContents = getScriptContents(scriptData);
-            processed[k] = preproc.preprocessScript(k, scriptContents);
+            processed[k] = preproc.preprocessScript(k, scriptContent);
          end
          if debugDump then file:writeString(("__preprocDebug/%s.lua"):format(k), processed[k]); end
          acceptScript(k, processed[k]);
