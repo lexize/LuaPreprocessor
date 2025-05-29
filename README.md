@@ -9,10 +9,15 @@ This is a table of annotations implemented so far.
 |`define`|Defines a keyword. After definition, this keyword will be replaced with `[VALUE]`, or empty char sequence if it has no value.|`--!define (NAME) [VALUE]`|
 |`undefine`|Undefines a keyword.|`--!undefine (NAME)`|
 |`macro`|Defines a macro. After definition, macro will be replaced with specified expression. If macro definition is invalid, it will be defined as a normal keyword.|`--!macro (NAME) [arg1, arg2, arg3...]; (EXPRESSION)`|
+|`ifequal`|Conditional annotation which's condition is two defines, two literals, or define and a literal having the same value.|`--!ifequal (literal\|define) (literal\|define)`|
+|`ifnotequal`|Conditional annotation which's condition is two defines, two literals, or define and a literal NOT having the same value.|`--!ifnotequal (literal\|define) (literal\|define)`|
 |`ifdef`|Conditional annotation which's condition is keyword with specified name being defined. Must be closed with `--!else` or `--!endif` annotation.|`--!ifdef (NAME)`|
 |`ifndef`|Conditional annotation which's condition is keyword with specified name being undefined. Must be closed with `--!else` or `--!endif` annotation.|`--!ifndef (NAME)`|
 |`else`|Conditional annotation that can work only in pair with another conditional annotation. It can also continue the chain of conditional annotations.|`--!else [CONDITIONAL_ANNOTATION_NAME (args)]`|
-|`endif`|Closes conditional annotation(s) chain||
+|`endif`|Closes conditional annotation(s) chain|`--!endif`|
+|`info`|Tells preprocessor to log info|`--!info (message)`|
+|`warning`|Tells preprocessor to log a warning|`--!warning (message)`|
+|`error`|Tells preprocessor to throw an error. Error will contain name of the script, line and column, and also an error message|`--!error (message)`|
 
 ## Setup
 In order to work, this preprocessor requires some setup, such as:
@@ -29,12 +34,15 @@ This is already enough for a basic setup. For more complex and customizable setu
 |`preproc.addAutoscript(name: string)`|Adds script with specified name to the autoscripts. It also worth mentioning that autoscripts that were added first will also be preprocessed earlier than all other scripts.|
 |`preproc.excludeScript(name: string)`|Excludes script from the avatar, and from preprocessing as well.|
 |`preproc.enableDebug(internal?: bool)`|Enables debug output. Passing no arguments to the function will enable regular level debugging, passing true will enable `INTERNAL` level debug output, and passing `false` will disable debug output.|
-|`preproc.define(name: string, value? :string)`|Defines a keyword. Works the same way as `--!define` annotation.|
-|`preproc.macro(name: string, macro: string\|function)`|Defines a macro. String definition works the same way as `--!macro` annotation, while passing a function as a `macro` argument allows definition of more complex macros, but only on init stage of preprocessing.|
+|`preproc.define(name: string, value?: string)`|Defines a keyword. Works the same way as `--!define` annotation.|
+|`preproc.macro(name: string, macro: string\|func(...: string...) -> string)`|Defines a macro. String definition works the same way as `--!macro` annotation, while passing a function as a `macro` argument allows definition of more complex macros, but only on init stage of preprocessing.|
 |`preproc.undefine(name: string)`| Works the same way as `--!undefine annotation`|
 |`preproc.runAfterPreprocess()`|Tells preprocessor to automatically run the entrypoint script after preprocessing is finished. Will not have any effect if entrypoint is not set.|
 |`preproc.optimization(level: integer)`|Sets the optimization level for the scripts. 0 - no optimization, 1 - removing comments, 2 - full optimization, removing all the comments and unnecessary whitespaces.|
 |`preproc.preprocessScript(name: string, content: string)`|Runs the script preprocessing and returns preprocessed output. Might be useful for more complex initialization setups or double-sided setups.|
+|`preproc.reset()`|Fully resets the state of the preprocessor.|
+|`preproc.setScriptAcceptor(acceptor: func(name: string, contents?: string))`|Sets the script acceptor which preprocessor will call after preprocessing the script. `contents` argument being nil means script should be removed.|
+|`preproc.setEntrypointGenerator(generator: func(autoscripts: [string]) -> string)`|Sets the entrypoint generator for the preprocessor. Preprocessor will call it during generation of entrypoint script generation.|
 |`preproc.run()`|Runs the preprocessor, preprocessing all the non-excluded scripts in the avatar.|
 
 ## Additional notes

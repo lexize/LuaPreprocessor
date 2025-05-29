@@ -24,6 +24,8 @@ local scriptAcceptor = nil;
 -- The entrypoint generator function
 local entrypointGenerator = nil;
 
+local currentScript = nil;
+
 local log_colors = {
     INFO = "#55FF55",
     DEBUG = "#00AA00",
@@ -293,75 +295,116 @@ end
 
 local conditionals;
 
-local function processConditionalAnnotation(scrBuf, cond, exec)
+local function processConditionalAnnotation(srcBuf, cond, exec)
    local tp, src, val;
+   local tokenPos = 0;
    local prevPos = 0;
    local out = "";
    repeat
-      tp, src, val = reader.readToken(scrBuf);
+      tokenPos = srcBuf:getPosition();
+      tp, src, val = reader.readToken(srcBuf);
       if tp == nil then
          error("Conditional annotations must be either closed with --!endif or continued by --!else, but EOF was found.");
       elseif isAnnotation(tp, val) then
+         updateLineAndColumn(srcBuf, tokenPos);
          local ann, annBuf, func = readAnnotation(val);
          if ann == "endif" then
             return out;
          elseif not conditionals[ann] or ann ~= "else" then
-            local v = (func(annBuf, scrBuf, exec) or "");
+            local v = (func(annBuf, srcBuf, exec) or "");
             if exec then
                out = out .. v;
             end
          elseif ann == "else" then
-            local v = (func(annBuf, scrBuf, exec and not cond, true) or "");
+            local v = (func(annBuf, srcBuf, exec and not cond, true) or "");
             return out .. (exec and v or "");
          end
       elseif tp == "literal" and exec and cond then
-         out = out .. processMacro(val, scrBuf, prevPos);
+         out = out .. processMacro(val, srcBuf, prevPos);
       else
          if exec and cond then
             out = out .. src;
          end
       end
-      prevPos = scrBuf:getPosition();
+      prevPos = tokenPos;
    until false
 end
 
-local function ifEqualAnnotation(annBuf, scrBuf, exec)
+local function ifEqualAnnotation(annBuf, srcBuf, exec)
+   local cond = exec or false;
+   if exec then
+      reader.skipWhitespaces(annBuf);
+      local tp1, arg1, arg1Val = reader.readToken(annBuf);
+      if tp1 == "literal" then
+         arg1Val = defines[arg1];
+      elseif tp1 == nil then
+         error("Define or a literal expected, but no argument were provided");
+      end
+      reader.expectType("whitespace", annBuf);
+      local tp2, arg2, arg2Val = reader.readToken(annBuf);
+      if tp2 == "literal" then
+         arg2Val = defines[arg2];
+      elseif tp2 == nil then
+         error("Define or a literal expected as a second argument, but not argument were provided")
+      end     cond = arg1Val == arg2Val;
+   end
 
+   return processConditionalAnnotation(srcBuf, cond, exec);
 end
 
-local function ifNEqualAnnotation(annBuf, scrBuf, exec)
+local function ifNEqualAnnotation(annBuf, srcBuf, exec)
+   local cond = exec or false;
+   if exec then
+      reader.skipWhitespaces(annBuf);
+      local tp1, arg1, arg1Val = reader.readToken(annBuf);
+      if tp1 == "literal" then
+         arg1Val = defines[arg1];
+      elseif tp1 == nil then
+         error("Define or a literal expected, but no argument were provided");
+      end
+      reader.expectType("whitespace", annBuf);
+      local tp2, arg2, arg2Val = reader.readToken(annBuf);
+      if tp2 == "literal" then
+         arg2Val = defines[arg2];
+      elseif tp2 == nil then
+         error("Define or a literal expected as a second argument, but not argument were provided")
+      end
 
+      cond = arg1Val ~= arg2Val;
+   end
+
+   return processConditionalAnnotation(srcBuf, cond, exec);
 end
 
-local function ifDefAnnotation(annBuf, scrBuf, exec)
+local function ifDefAnnotation(annBuf, srcBuf, exec)
    local tp, src, name = reader.readToken(annBuf);
    if tp == "literal" then
       local cond = exec and defines[name] ~= nil;
-      return processConditionalAnnotation(scrBuf, cond, exec);
+      return processConditionalAnnotation(srcBuf, cond, exec);
    else
       error(("Expected name of the define, got %s"):format(tp))
    end
 end
 
-local function ifNDefAnnotation(annBuf, scrBuf, exec)
+local function ifNDefAnnotation(annBuf, srcBuf, exec)
    local tp, src, name = reader.readToken(annBuf);
    if tp == "literal" then
       local cond = exec and defines[name] == nil;
-      return processConditionalAnnotation(scrBuf, cond, exec);
+      return processConditionalAnnotation(srcBuf, cond, exec);
    else
       error(("Expected name of the define, got %s"):format(tp))
    end
 end
 
-local function elseAnnotation(annBuf, scrBuf, exec, valid)
+local function elseAnnotation(annBuf, srcBuf, exec, valid)
    local tp, src, name = reader.readToken(annBuf);
    if tp == nil or tp ~= "literal" then
-      return processConditionalAnnotation(scrBuf, true, exec);
+      return processConditionalAnnotation(srcBuf, true, exec);
    else
       local a = conditionals[name];
       if name ~= "else" and a ~= nil then
-         reader.expectType(annBuf, "whitespace");
-         return a(annBuf, scrBuf, exec);
+         reader.skipWhitespaces(annBuf);
+         return a(annBuf, srcBuf, exec);
       else
          error(("--!else must be either followed by a name of other conditional annotation and it's arguments, or followed by whitespace or linebreak, but, got %s instead"):format(tp));
       end
@@ -405,20 +448,42 @@ local function macroAnnotation(annBuf, _, exec)
    preproc.macro(name, macroDefString);
 end
 
+local function infoAnnotation(annBuf, _, exec) 
+   if not exec then return end
+   reader.skipWhitespaces(annBuf);
+   local msg = annBuf:readByteArray();
+   log(msg, "INFO", currentScript);
+end
+
+local function warningAnnotation(annBuf, _, exec)
+   if not exec then return end
+   reader.skipWhitespaces(annBuf);
+   local msg = annBuf:readByteArray();
+   log(msg, "WARNING", currentScript);
+end
+
+local function errorAnnotation(annBuf, srcBuf, exec)
+   if not exec then return end
+   reader.skipWhitespaces(annBuf);
+   local msg = annBuf:readByteArray();
+   log(("Preprocessing error in script §a%s§r at §a%s§r:§a%s"):format(currentScript, currentCtx.line, currentCtx.column), "ERROR", currentScript);
+   log(msg, "ERROR", currentScript)
+   error("Preprocessing error");
+end
+
 annotations = {
    ["define"] = defineAnnotation,
    ["undefine"] = undefineAnnotation,
    ["macro"] = macroAnnotation,
    ["ifequal"] = ifEqualAnnotation,
    ["ifnotequal"] = ifNEqualAnnotation,
-   ["ifnumequal"] = ifNumEqualAnnotation,
-   ["ifnumnotequal"] = ifNumNotEqualAnnotation,
-   ["ifgequal"] = ifGEqualAnnotation,
-   ["iflequal"] = ifLEqualAnnotation,
    ["ifdef"] = ifDefAnnotation,
    ["ifndef"] = ifNDefAnnotation,
    ["else"] = elseAnnotation,
    ["endif"] = endIfAnnotation,
+   ["info"] = infoAnnotation,
+   ["warning"] = warningAnnotation,
+   ["error"] = errorAnnotation
 }
 
 conditionals = {
@@ -433,6 +498,7 @@ conditionals = {
 function preproc.preprocessScript(name, content)
    log("Starting to process script \""..name.."\"", "DEBUG");
    preproc.define("__SCRIPT__", name);
+   currentScript = name;
    local ctx = {
       line = 1,
       column = 1,
@@ -441,12 +507,15 @@ function preproc.preprocessScript(name, content)
    currentCtx = ctx;
    local buf = strBuf(content);
    local out = "";
+   local tokenPos;
    local prevPos = 0; 
-   repeat 
+   repeat
+      tokenPos = buf:getPosition();
       local tp, source, val = reader.readToken(buf);
       if tp == nil then
          break
       elseif isAnnotation(tp, val) then
+         updateLineAndColumn(buf, tokenPos);
          local ann, annBuf, func = readAnnotation(val);
          if ann then
             addition = func(annBuf, buf, true);
@@ -460,7 +529,7 @@ function preproc.preprocessScript(name, content)
       else
          out = out .. source;
       end
-      prevPos = buf:getPosition();
+      prevPos = tokenPos;
    until false
    if optimisationLevel > 0 then
       log("Optimizing output of script \""..name..'"', "DEBUG");
@@ -483,6 +552,7 @@ function preproc.preprocessScript(name, content)
    end
    buf:close();
    currentCtx = nil;
+   currentScript = nil;
    return out;
 end
 

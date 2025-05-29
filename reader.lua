@@ -178,7 +178,7 @@ local function readMultilineComment(start, buf)
 end
 
 local token_readers = {
-   {"literal", "MATCH:^[_%w]+$"},
+   {"literal", "MATCH:^[_%a][_%w]*$"},
    {"whitespace", "MATCH:^%s+$"},
    {"multiline_comment", "--[", readMultilineComment},
    {"multiline_string", "[", readMultilineString},
