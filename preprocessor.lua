@@ -249,6 +249,40 @@ local function updateLineAndColumn(buf, startPos)
    buf:setPosition(pos);
 end
 
+local __expandMacro;
+
+__expandMacro = function(output, depth)
+   if depth > 10 then return output end
+   local buf = strBuf(output);
+   local outputBuf = "";
+   local tp, src, val;
+   repeat
+      tp, src, val = reader.readToken(buf);
+      if tp == "literal" then
+         local rep = defines[val] or macros[val];
+         local typ = type(rep);
+         local __o;
+         if rep ~= nil then
+            if typ == "string" then
+               __o = __expandMacro(rep, depth + 1);
+            elseif typ == "function" then
+               local args = __read_args(buf);
+               if args ~= nil then
+                  __o = __expandMacro(rep(table.unpack(args)) or "", depth + 1);
+               end
+            end
+         else
+            __o = val;
+         end
+         outputBuf = outputBuf .. __o;
+      elseif tp ~= nil then
+         outputBuf = outputBuf .. src;
+      end
+   until tp == nil;
+   buf:close();
+   return outputBuf;
+end
+
 local function processMacro(val, buf, startPos)
    if val == "__LINE__" or val == "__COLUMN__" then
       updateLineAndColumn(buf, startPos);
@@ -257,11 +291,11 @@ local function processMacro(val, buf, startPos)
    local typ = type(rep);
    if rep ~= nil then
       if typ == "string" then
-         return rep;
+         return __expandMacro(rep, 0);
       elseif typ == "function" then
          local args = __read_args(buf);
          if args ~= nil then
-            return rep(table.unpack(args)) or "";
+            return __expandMacro(rep(table.unpack(args)) or "", 0);
          end
       end
    else
@@ -559,7 +593,7 @@ end
 ---Resets the state of the preprocessor.
 function preproc.reset()
    defines = {};
-   macros = {};
+   macros = {}; 
    autoscripts = {};
    entrypoint = avatar:getNBT().metadata.autoScripts[1];
    runAfterPreproc = false;
@@ -622,7 +656,7 @@ function preproc.run()
          if not processed[k] then
             processed[k] = preproc.preprocessScript(k, scriptContent);
          end
-         if debugDump then file:writeString(("__preprocDebug/%s.lua"):format(k), processed[k]); end
+         --if debugDump then file:writeString(("__preprocDebug/%s.lua"):format(k), processed[k]); end
          acceptScript(k, processed[k]);
       end
    end

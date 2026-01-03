@@ -190,7 +190,7 @@ local token_readers = {
       ";", ":", ",", "...", "..", "."
    },
    { "string", '"', readString('"') },
-   { "string", "`", readString("'") },
+   { "string", "'", readString("'") },
    { "number", "MATCH:^%d+$" }
 }
 
